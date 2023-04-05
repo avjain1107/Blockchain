@@ -1,11 +1,13 @@
 {
   "name": "hardhat-project",
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^2.0.2"
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "@nomiclabs/hardhat-ethers": "npm:hardhat-deploy-ethers@^0.3.0-beta.13",
+    "ethers": "^5.7.2"
   },
   "dependencies": {
-    "ethers": "5.7.2",
     "ganache-cli": "^6.12.2",
+    "hardhat-deploy": "^0.11.25",
     "solidity-coverage": "^0.8.2"
   }
 }
