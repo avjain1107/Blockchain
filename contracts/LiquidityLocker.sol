@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT
-pragma solidity 0.8.9;
+pragma solidity 0.8.18;
 
-import "@openzeppelin/contracts@4.7.3/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title Liquidity Locker Implementation
@@ -88,6 +88,7 @@ contract LiquidityLocker {
         uint256 endTimestamp;
         uint256 cliffDurartion;
         uint256 rewardRate;
+        uint256 durationWhenAddingAssests;
     }
     struct Vesting {
         uint256 startTimestamp;
@@ -95,6 +96,7 @@ contract LiquidityLocker {
         uint256 vestedAmount;
         uint256 rewardEarned;
         uint256 referalRewardRate;
+        uint256 lastTimeAssestAdded;
     }
 
     /**
@@ -170,12 +172,14 @@ contract LiquidityLocker {
      * @param _endTimestamp : time in second before maturity
      * @param _cliffDuration : time in second before assest withdrawal
      * @param _rewardRate : reward rate for that schedule
+     * @param _durationWhenAddingAssests : only can add assest after a particular duration
      * Emit a {VestingScheduled} event
      */
     function scheduleVesting(
         uint256 _endTimestamp,
         uint256 _cliffDuration,
-        uint256 _rewardRate
+        uint256 _rewardRate,
+        uint256 _durationWhenAddingAssests
     ) external onlyOwner {
         require(
             _cliffDuration <= _endTimestamp,
@@ -185,7 +189,8 @@ contract LiquidityLocker {
         vestingScheme[_scheduleVestingCount] = Schedule(
             _endTimestamp,
             _cliffDuration,
-            _rewardRate
+            _rewardRate,
+            _durationWhenAddingAssests
         );
         emit VestingScheduled(
             _scheduleVestingCount,
@@ -227,7 +232,8 @@ contract LiquidityLocker {
                 _scheduleVestingCount,
                 _vestedAmount - manageralFee,
                 0,
-                referalReward
+                referalReward,
+                block.timestamp
             );
         } else {
             vesting[msg.sender] = Vesting(
@@ -235,7 +241,8 @@ contract LiquidityLocker {
                 _scheduleVestingCount,
                 _vestedAmount - manageralFee,
                 0,
-                0
+                0,
+                block.timestamp
             );
         }
         isBenefiter[msg.sender] = true;
@@ -296,14 +303,14 @@ contract LiquidityLocker {
             "LiquidityLocker: Vested assests have not reached their maturity."
         );
 
-        uint256 totalReward = (userVest.vestedAmount *
+        uint256 totalPayload = (userVest.vestedAmount *
             (userSchedule.rewardRate + userVest.referalRewardRate)) /
             100 +
             userVest.rewardEarned +
             userVest.vestedAmount;
-        token.transfer(msg.sender, totalReward);
+        token.transfer(msg.sender, totalPayload);
         isBenefiter[msg.sender] = false;
-        emit DropAllAssests(msg.sender, totalReward);
+        emit DropAllAssests(msg.sender, totalPayload);
     }
 
     /**
@@ -312,12 +319,17 @@ contract LiquidityLocker {
      *         passed address must not be already refered
      *         passed address must not be null address
      *         sender cannot refer himself
+     *         two addresses cannot refer one another
      * @param to : address to refer
      */
     function refer(address to) external NotRefered(to) notNull(to) {
         require(
             msg.sender != to,
             "LiquidityLocker: Msg Sender cannot approve himself."
+        );
+        require(
+            referal[msg.sender] != to,
+            "LiquidityLocker: Two addresses cannot refer each other."
         );
         referal[to] = msg.sender;
         isRefered[to] = true;
@@ -328,6 +340,8 @@ contract LiquidityLocker {
      * Requirement -
      *         only address with existing vest can add assest
      *         cliffduration must not have passed
+     *         need atleast 20% of the Vested amount to add
+     *         consecutive addition must be after a particular time duration
      * @param amount : token to add
      * Emit a {AddAssests} event
      */
@@ -335,13 +349,24 @@ contract LiquidityLocker {
         Vesting memory userVest = vesting[msg.sender];
         Schedule memory userSchedule = vestingScheme[userVest.scheduleId];
         require(
+            amount >= ((userVest.vestedAmount * 20) / 100),
+            "LiquidityLocker: add atleast 20% of already vested assests"
+        );
+        require(
             block.timestamp <
                 userVest.startTimestamp + userSchedule.cliffDurartion,
             "LiquidityLocker: cannot add assest after cliffDuration."
         );
-        uint256 reward = (userVest.vestedAmount) / 100;
-        vesting[msg.sender].vestedAmount += amount;
-        vesting[msg.sender].rewardEarned += reward;
+        require(
+            block.timestamp >=
+                userVest.lastTimeAssestAdded +
+                    userSchedule.durationWhenAddingAssests,
+            "LiquidityLocker: Duration between adding assests have not elapsed. "
+        );
+        uint256 manageralFee = (amount * manageralRate) / 100;
+        vesting[msg.sender].vestedAmount += amount - manageralFee;
+        vesting[msg.sender].lastTimeAssestAdded += block.timestamp;
+        token.transferFrom(msg.sender, address(this), amount);
         emit AddAssests(msg.sender, amount);
     }
 }
