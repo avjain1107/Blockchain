@@ -1,11 +1,12 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 /**
  * @title MultiSig Wallet Assignment
  * @author Avinash Jain
  */
-contract MultiSigWallet {
+contract MultiSigWallet is Initializable {
     /**
      * @dev emitted when a Approval is revoked by approved owner
      * @param owner : Approved owner who revoke his approval
@@ -42,7 +43,7 @@ contract MultiSigWallet {
     mapping(uint256 => mapping(address => bool)) private approval;
     mapping(address => bool) private isOwner;
     uint256[] private readyToExecute;
-    uint256 private transactionCount = 1;
+    uint256 private transactionCount;
     uint256 public confirmationRequired;
     address private owner;
 
@@ -57,10 +58,11 @@ contract MultiSigWallet {
      * @dev sets value of confirmation count and contract owner
      * @param _confirmationRequired : number of confirmation required to execute a transaction
      */
-    constructor(uint256 _confirmationRequired) {
+    function initialize(uint256 _confirmationRequired) external initializer {
         owner = msg.sender;
         isOwner[msg.sender] = true;
         confirmationRequired = _confirmationRequired;
+        transactionCount =1;
     }
 
     modifier onlyOwner() {
