@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title MultiSig Wallet Assignment
@@ -46,23 +47,29 @@ contract MultiSigWallet is Initializable {
     uint256 private transactionCount;
     uint256 public confirmationRequired;
     address private owner;
+    IERC20 token;
 
     struct Transaction {
         address payable to;
         uint256 value;
         bool executed;
         uint256 approvalCount;
+        bool isTokenTransafer;
     }
 
     /**
      * @dev sets value of confirmation count and contract owner
      * @param _confirmationRequired : number of confirmation required to execute a transaction
      */
-    function initialize(uint256 _confirmationRequired) external initializer {
+    function initialize(
+        uint256 _confirmationRequired,
+        address _token
+    ) external initializer {
         owner = msg.sender;
         isOwner[msg.sender] = true;
         confirmationRequired = _confirmationRequired;
-        transactionCount =1;
+        transactionCount = 1;
+        token = IERC20(_token);
     }
 
     modifier onlyOwner() {
@@ -110,14 +117,21 @@ contract MultiSigWallet is Initializable {
      */
     function submitTransaction(
         address payable _to,
-        uint256 _value
+        uint256 _value,
+        bool _isTokenTransfer
     ) external onlyOwner notNull(_to) {
         require(
             _value > 0,
             "MultiSigWallet: Amount to transfer should not be zero."
         );
         uint256 txId = transactionCount++;
-        transaction[txId] = Transaction(_to, _value, false, 1);
+        transaction[txId] = Transaction(
+            _to,
+            _value,
+            false,
+            1,
+            _isTokenTransfer
+        );
         approval[txId][msg.sender] = true;
         emit SubmitTransaction(msg.sender, txId);
     }
@@ -188,7 +202,11 @@ contract MultiSigWallet is Initializable {
         uint256 _txId = readyToExecute[randomNumber];
         address payable _to = transaction[_txId].to;
         uint256 _value = transaction[_txId].value;
-        _to.transfer(_value);
+        if (transaction[_txId].isTokenTransafer == true) {
+            token.transferFrom(msg.sender, _to, _value);
+        } else {
+            _to.transfer(_value);
+        }
         transaction[_txId].executed = true;
         readyToExecute[randomNumber] = readyToExecute[size - 1];
         readyToExecute.pop();
@@ -208,19 +226,19 @@ contract MultiSigWallet is Initializable {
             size > 0,
             "MultiSigWallet: No transaction is yet ready to execute"
         );
-
-        do {
-            uint256 randomNumber = _generateRandomNumber(size);
-            uint256 _txId = readyToExecute[randomNumber];
+        for (uint256 i = 0; i < size; i++) {
+            uint256 _txId = readyToExecute[i];
             address payable _to = transaction[_txId].to;
             uint256 _value = transaction[_txId].value;
-            _to.transfer(_value);
+            if (transaction[_txId].isTokenTransafer == true) {
+                token.transferFrom(msg.sender, _to, _value);
+            } else {
+                _to.transfer(_value);
+            }
             transaction[_txId].executed = true;
-            readyToExecute[randomNumber] = readyToExecute[size - 1];
-            readyToExecute.pop();
             emit ExecuteTransaction(msg.sender, _txId, _to, _value);
-            size -= 1;
-        } while (size > 0);
+        }
+        delete readyToExecute;
     }
 
     /**
