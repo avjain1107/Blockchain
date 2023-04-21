@@ -1,0 +1,12 @@
+node_modules
+.env
+coverage
+coverage.json
+typechain
+typechain-types
+package-lock.json
+package.json
+.openzeppelin
+# Hardhat files
+cache
+artifacts
