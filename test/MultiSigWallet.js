@@ -5,12 +5,16 @@ const { any } = require("hardhat/internal/core/params/argumentTypes");
 const { user } = require("pg/lib/defaults");
 describe("Tests for Multi Sig Wallet Contract", function () {
   async function deployTokenFixture() {
+    const ERC20Token = await ethers.getContractFactory("ERC20Token");
     const MultiSigWallet = await ethers.getContractFactory("MultiSigWallet");
-    const hardhatMultiSigWallet = await MultiSigWallet.deploy(3);
+    const hardhatERC20 = await ERC20Token.deploy();
+    const hardhatMultiSigWallet = await MultiSigWallet.deploy();
     const [owner, user1, user2, user3] = await ethers.getSigners();
     const zero_address = "0x0000000000000000000000000000000000000000";
+    await hardhatMultiSigWallet.initialize(3, hardhatERC20.address);
     const amountWei = ethers.utils.parseUnits("100", "wei");
     return {
+      hardhatERC20,
       hardhatMultiSigWallet,
       owner,
       user1,
@@ -20,15 +24,23 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       amountWei,
     };
   }
+  describe("Test for initialize function", function () {
+    it("Initialize function can only be initialized once", async function () {
+      const { hardhatMultiSigWallet, hardhatERC20, user1, user2 } =
+        await loadFixture(deployTokenFixture);
+      await expect(
+        hardhatMultiSigWallet.initialize(2, hardhatERC20.address)
+      ).to.be.revertedWith("Initializable: contract is already initialized");
+    });
+  });
   describe("Test for submit transaction function.", function () {
     it("Only Approved owners can submit a transaction.", async function () {
-      const { hardhatMultiSigWallet, user1, user2 } = await loadFixture(
-        deployTokenFixture
-      );
+      const { hardhatMultiSigWallet, hardhatERC20, user1, user2 } =
+        await loadFixture(deployTokenFixture);
       await expect(
         hardhatMultiSigWallet
           .connect(user1)
-          .submitTransaction(user2.address, 100)
+          .submitTransaction(user2.address, 100, 1)
       ).to.be.revertedWith(
         "MultiSigWallet: Only Approved owners can perform this operation."
       );
@@ -38,7 +50,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
         deployTokenFixture
       );
       await expect(
-        hardhatMultiSigWallet.submitTransaction(zero_address, 100)
+        hardhatMultiSigWallet.submitTransaction(zero_address, 100, 1)
       ).to.be.revertedWith("MultiSigWallet: Invalid address");
     });
     it("Amount given while submitting transaction must be greater than zero.", async function () {
@@ -46,7 +58,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
         deployTokenFixture
       );
       await expect(
-        hardhatMultiSigWallet.submitTransaction(user1.address, 0)
+        hardhatMultiSigWallet.submitTransaction(user1.address, 0, 1)
       ).to.be.revertedWith(
         "MultiSigWallet: Amount to transfer should not be zero."
       );
@@ -55,7 +67,9 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, owner } = await loadFixture(
         deployTokenFixture
       );
-      await expect(hardhatMultiSigWallet.submitTransaction(user1.address, 100))
+      await expect(
+        hardhatMultiSigWallet.submitTransaction(user1.address, 100, 1)
+      )
         .to.emit(hardhatMultiSigWallet, "SubmitTransaction")
         .withArgs(owner.address, 1);
     });
@@ -65,7 +79,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 1);
       await expect(
         hardhatMultiSigWallet.connect(user1).approveTransaction(1)
       ).to.be.revertedWith(
@@ -85,7 +99,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2, user3, amountWei } =
         await loadFixture(deployTokenFixture);
 
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 0);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await hardhatMultiSigWallet.addOwner(user2.address);
       await hardhatMultiSigWallet.addOwner(user3.address);
@@ -102,7 +116,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user1.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user1.address, 100, 1);
       await expect(
         hardhatMultiSigWallet.approveTransaction(1)
       ).to.be.revertedWith(
@@ -113,7 +127,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 1);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await expect(hardhatMultiSigWallet.connect(user1).approveTransaction(1))
         .to.emit(hardhatMultiSigWallet, "ApproveTransaction")
@@ -123,14 +137,15 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2, user3 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user3.address, 100);
+      const arraySize = await hardhatMultiSigWallet.readyToExecuteTransaction();
+      await hardhatMultiSigWallet.submitTransaction(user3.address, 100, 1);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await hardhatMultiSigWallet.addOwner(user2.address);
       await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
       await hardhatMultiSigWallet.connect(user2).approveTransaction(1);
       await expect(
         await hardhatMultiSigWallet.readyToExecuteTransaction()
-      ).to.equal(1);
+      ).to.equal(arraySize + 1);
     });
   });
   describe("Test for revokeTransaction function.", function () {
@@ -138,7 +153,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2, user3 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 1);
       await expect(
         hardhatMultiSigWallet.connect(user1).revokeTransaction(1)
       ).to.be.revertedWith(
@@ -158,7 +173,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2, user3, amountWei } =
         await loadFixture(deployTokenFixture);
 
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 0);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await hardhatMultiSigWallet.addOwner(user2.address);
       await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
@@ -174,7 +189,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 1);
       await hardhatMultiSigWallet.revokeTransaction(1);
       await expect(
         hardhatMultiSigWallet.revokeTransaction(1)
@@ -186,18 +201,19 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2, user3 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user3.address, 100);
-      await hardhatMultiSigWallet.submitTransaction(user3.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user3.address, 100, 1);
+      await hardhatMultiSigWallet.submitTransaction(user3.address, 100, 1);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await hardhatMultiSigWallet.addOwner(user2.address);
       await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
       await hardhatMultiSigWallet.connect(user2).approveTransaction(1);
       await hardhatMultiSigWallet.connect(user1).approveTransaction(2);
       await hardhatMultiSigWallet.connect(user2).approveTransaction(2);
+      const arraySize = await hardhatMultiSigWallet.readyToExecuteTransaction();
       await hardhatMultiSigWallet.connect(user2).revokeTransaction(2);
       await expect(
         await hardhatMultiSigWallet.readyToExecuteTransaction()
-      ).to.equal(1);
+      ).to.equal(arraySize - 1);
     });
   });
   describe("Test for executeTransaction function.", function () {
@@ -205,29 +221,60 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 1);
       await expect(
         hardhatMultiSigWallet.connect(user1).executeTransaction()
       ).to.be.revertedWith(
         "MultiSigWallet: No transaction is yet ready to execute"
       );
     });
-    it("Successfully Execute transaction with enough approval.", async function () {
-      const { hardhatMultiSigWallet, user1, user2, amountWei } =
+    it("Successfully Execute token transfer transaction with enough approval.", async function () {
+      const { hardhatMultiSigWallet, user1, user2, owner, hardhatERC20 } =
         await loadFixture(deployTokenFixture);
+      await hardhatERC20.approve(hardhatMultiSigWallet.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 1);
 
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await hardhatMultiSigWallet.addOwner(user2.address);
       await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
       await hardhatMultiSigWallet.connect(user2).approveTransaction(1);
-      await expect(
-        hardhatMultiSigWallet
-          .connect(user1)
-          .executeTransaction({ value: amountWei })
-      )
+      const arraySize = await hardhatMultiSigWallet.readyToExecuteTransaction();
+      tokenTransfer = await hardhatMultiSigWallet.executeTransaction();
+      await expect(tokenTransfer)
+        .to.emit(hardhatMultiSigWallet, "ExecuteTransaction")
+        .withArgs(owner.address, 1, user2.address, 100);
+      expect(await hardhatMultiSigWallet.readyToExecuteTransaction()).to.equal(
+        arraySize - 1
+      );
+      await expect(tokenTransfer).to.changeTokenBalance(
+        hardhatERC20,
+        owner,
+        -100
+      );
+      await expect(tokenTransfer).to.changeTokenBalance(
+        hardhatERC20,
+        user2,
+        100
+      );
+    });
+    it("Successfully Execute ether transfer transaction with enough approval.", async function () {
+      const { hardhatMultiSigWallet, user1, user2, amountWei } =
+        await loadFixture(deployTokenFixture);
+
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 0);
+      await hardhatMultiSigWallet.addOwner(user1.address);
+      await hardhatMultiSigWallet.addOwner(user2.address);
+      await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
+      await hardhatMultiSigWallet.connect(user2).approveTransaction(1);
+      etherTransfer = await hardhatMultiSigWallet
+        .connect(user1)
+        .executeTransaction({ value: amountWei });
+
+      await expect(etherTransfer)
         .to.emit(hardhatMultiSigWallet, "ExecuteTransaction")
         .withArgs(user1.address, 1, user2.address, 100);
+      await expect(etherTransfer).to.changeEtherBalance(user2, amountWei);
+      await expect(etherTransfer).to.changeEtherBalance(user1, -amountWei);
     });
   });
   describe("Test for batchExecuteTransaction function.", function () {
@@ -235,7 +282,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user1.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user1.address, 100, 0);
       await expect(
         hardhatMultiSigWallet.connect(user1).batchExecuteTransaction()
       ).to.be.revertedWith(
@@ -246,7 +293,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       const { hardhatMultiSigWallet, user1, user2 } = await loadFixture(
         deployTokenFixture
       );
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 0);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await expect(
         hardhatMultiSigWallet.connect(user1).batchExecuteTransaction()
@@ -254,11 +301,11 @@ describe("Tests for Multi Sig Wallet Contract", function () {
         "MultiSigWallet: No transaction is yet ready to execute"
       );
     });
-    it("Successfully Execute transaction with enough approval.", async function () {
+    it("Successfully Execute Ether transaction with enough approval.", async function () {
       const { hardhatMultiSigWallet, user1, user2, amountWei } =
         await loadFixture(deployTokenFixture);
 
-      await hardhatMultiSigWallet.submitTransaction(user2.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 0);
       await hardhatMultiSigWallet.addOwner(user1.address);
       await hardhatMultiSigWallet.addOwner(user2.address);
       await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
@@ -270,6 +317,25 @@ describe("Tests for Multi Sig Wallet Contract", function () {
       )
         .to.emit(hardhatMultiSigWallet, "ExecuteTransaction")
         .withArgs(user1.address, 1, user2.address, 100);
+      expect(await hardhatMultiSigWallet.readyToExecuteTransaction()).to.equal(
+        0
+      );
+    });
+    it("After batch execution number of transaction ready to execute becomes zero.", async function () {
+      const { hardhatMultiSigWallet, user1, user2, owner, hardhatERC20 } =
+        await loadFixture(deployTokenFixture);
+      await hardhatERC20.approve(hardhatMultiSigWallet.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user2.address, 100, 1);
+
+      await hardhatMultiSigWallet.addOwner(user1.address);
+      await hardhatMultiSigWallet.addOwner(user2.address);
+      await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
+      await hardhatMultiSigWallet.connect(user2).approveTransaction(1);
+      await hardhatMultiSigWallet.batchExecuteTransaction();
+      await expect(
+        await hardhatMultiSigWallet.readyToExecuteTransaction()
+      ).to.equal(0);
+      expect(await hardhatERC20.balanceOf(user2.address)).to.equal(100);
     });
   });
   describe("Test for addOwner function.", function () {
@@ -313,7 +379,7 @@ describe("Tests for Multi Sig Wallet Contract", function () {
         deployTokenFixture
       );
       await hardhatMultiSigWallet.addOwner(user1.address);
-      await hardhatMultiSigWallet.submitTransaction(user1.address, 100);
+      await hardhatMultiSigWallet.submitTransaction(user1.address, 100, 1);
       await hardhatMultiSigWallet.connect(user1).approveTransaction(1);
       await expect(
         await hardhatMultiSigWallet.getTransactionApprovalCount(1)
